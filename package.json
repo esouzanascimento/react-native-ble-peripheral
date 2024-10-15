@@ -1,6 +1,6 @@
 {
-  "name": "react-native-ble-peripheral",
-  "version": "2.0.26",
+  "name": "syhm-peripheral",
+  "version": "1.0.1",
   "description": "a simulator for a BLE peripheral, to help with testing BLE apps without an actual peripheral BLE device",
   "main": "index.js",
   "types": "index.d.ts",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/himelbrand/react-native-ble-peripheral.git"
+    "url": "git+https://github.com/esouzanascimento/react-native-ble-peripheral.git"
   },
   "keywords": [
     "react-native",
@@ -17,10 +17,10 @@
     "peripheral",
     "react"
   ],
-  "author": "Omri Himelbrand",
+  "author": "I2L",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/himelbrand/react-native-ble-peripheral/issues"
+    "url": "https://github.com/esouzanascimento/react-native-ble-peripheral/issues"
   },
-  "homepage": "https://github.com/himelbrand/react-native-ble-peripheral#readme"
+  "homepage": "https://github.com/esouzanascimento/react-native-ble-peripheral#readme"
 }

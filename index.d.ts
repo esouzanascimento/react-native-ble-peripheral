@@ -1,4 +1,4 @@
-declare module "react-native-ble-peripheral" {
+declare module "syhm-peripheral" {
   function addService(UUID: string, primary: boolean): void;
   function addCharacteristicToService(
     ServiceUUID: string,
