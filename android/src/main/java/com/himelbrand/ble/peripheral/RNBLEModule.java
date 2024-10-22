@@ -203,9 +203,12 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
 
 
         AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
-                .setIncludeDeviceName(true);
-        for (BluetoothGattService service : this.servicesMap.values()) {
-            dataBuilder.addServiceUuid(new ParcelUuid(service.getUuid()));
+                .setIncludeDeviceName(false);
+        // Add only essential service UUIDs
+        if (!servicesMap.isEmpty()) {
+            // Assuming you have a primary service to advertise
+            BluetoothGattService primaryService = servicesMap.values().iterator().next();
+            dataBuilder.addServiceUuid(new ParcelUuid(primaryService.getUuid()));
         }
         AdvertiseData data = dataBuilder.build();
         Log.i("RNBLEModule", data.toString());
