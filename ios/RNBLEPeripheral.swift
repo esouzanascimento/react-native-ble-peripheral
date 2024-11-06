@@ -35,40 +35,75 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     func addService(_ uuid: String, primary: Bool) {
         let serviceUUID = CBUUID(string: uuid)
         let service = CBMutableService(type: serviceUUID, primary: primary)
-        if(servicesMap.keys.contains(uuid) != true){
+        if !servicesMap.keys.contains(uuid) {
             servicesMap[uuid] = service
-            manager.add(service)
-            print("added service \(uuid)")
-        }
-        else {
-            alertJS("service \(uuid) already there")
+            print("Added service \(uuid) to servicesMap")
+        } else {
+            alertJS("Service \(uuid) already exists")
         }
     }
-    
-    @objc(addCharacteristicToService:uuid:permissions:properties:data:)
-    func addCharacteristicToService(_ serviceUUID: String, uuid: String, permissions: UInt, properties: UInt, data: String) {
+
+    @objc(addCharacteristicToService:uuid:permissions:properties:)
+    func addCharacteristicToService(_ serviceUUID: String, uuid: String, permissions: UInt, properties: UInt) {
+        guard let service = servicesMap[serviceUUID] else {
+            alertJS("Service \(serviceUUID) not found")
+            return
+        }
+        
         let characteristicUUID = CBUUID(string: uuid)
         let propertyValue = CBCharacteristicProperties(rawValue: properties)
         let permissionValue = CBAttributePermissions(rawValue: permissions)
-        let byteData: Data = data.data(using: .utf8)!
-        let characteristic = CBMutableCharacteristic( type: characteristicUUID, properties: propertyValue, value: byteData, permissions: permissionValue)
-        servicesMap[serviceUUID]?.characteristics?.append(characteristic)
-        print("added characteristic to service")
+        let characteristic = CBMutableCharacteristic(type: characteristicUUID, properties: propertyValue, value: nil, permissions: permissionValue)
+        
+        if let existingCharacteristics = service.characteristics {
+            service.characteristics = existingCharacteristics + [characteristic]
+        } else {
+            service.characteristics = [characteristic]
+        }
+        print("Added characteristic to service \(serviceUUID)")
+    }
+
+    @objc(addCharacteristicToServiceWithValue:uuid:permissions:properties:value:)
+    func addCharacteristicToServiceWithValue(_ serviceUUID: String, uuid: String, permissions: UInt, properties: UInt, value: String) {
+        guard let service = servicesMap[serviceUUID] else {
+            alertJS("Service \(serviceUUID) not found")
+            return
+        }
+        
+        let characteristicUUID = CBUUID(string: uuid)
+        let propertyValue = CBCharacteristicProperties(rawValue: properties)
+        let permissionValue = CBAttributePermissions(rawValue: permissions)
+        let byteData = value.data(using: .utf8)!
+        let characteristic = CBMutableCharacteristic(type: characteristicUUID, properties: propertyValue, value: byteData, permissions: permissionValue)
+        
+        if let existingCharacteristics = service.characteristics {
+            service.characteristics = existingCharacteristics + [characteristic]
+        } else {
+            service.characteristics = [characteristic]
+        }
+        print("Added characteristic with value to service \(serviceUUID)")
     }
     
     @objc func start(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        if (manager.state != .poweredOn) {
-            alertJS("Bluetooth turned off")
-            return;
+        if manager.state != .poweredOn {
+            alertJS("Bluetooth is turned off")
+            return
         }
         
         startPromiseResolve = resolve
         startPromiseReject = reject
-
+        
+        // Add all services to the peripheral manager
+        for (_, service) in servicesMap {
+            manager.add(service)
+            print("Added service \(service.uuid) to peripheral manager")
+        }
+        
         let advertisementData = [
             CBAdvertisementDataLocalNameKey: name,
             CBAdvertisementDataServiceUUIDsKey: getServiceUUIDArray()
-            ] as [String : Any]
+        ] as [String : Any]
+        
         manager.startAdvertising(advertisementData)
     }
     
@@ -113,34 +148,54 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         }
     }
 
-    // Respond to Write request
-    func peripheralManager(peripheral: CBPeripheralManager, didReceiveWriteRequests requests: [CBATTRequest])
-    {
-        for request in requests
-        {
-            let characteristic = getCharacteristic(request.characteristic.uuid)
-            if (characteristic == nil) { alertJS("characteristic for writing not found") }
-            if request.characteristic.uuid.isEqual(characteristic?.uuid)
-            {
-                let char = characteristic as! CBMutableCharacteristic
-                char.value = request.value
-            } else {
-                alertJS("characteristic you are trying to access doesn't match")
+    func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        for request in requests {
+            let centralUUID = request.central.identifier.uuidString
+            let characteristicUUID = request.characteristic.uuid.uuidString
+            let value = request.value ?? Data()
+            let dataArray = [UInt8](value)
+            
+            let eventBody: [String: Any] = [
+                "data": dataArray,
+                "device": centralUUID,
+                "characteristicUUID": characteristicUUID
+            ]
+            if hasListeners {
+                sendEvent(withName: "WriteEvent", body: eventBody)
             }
+            
+            // Update the characteristic's value
+            if let characteristic = getCharacteristic(request.characteristic.uuid) as? CBMutableCharacteristic {
+                characteristic.value = value
+            }
+            
+            // Respond to the write request
+            peripheral.respond(to: request, withResult: .success)
         }
-        manager.respond(to: requests[0], withResult: .success)
     }
 
-    // Respond to Subscription to Notification events
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
-        let char = characteristic as! CBMutableCharacteristic
-        print("subscribed centrals: \(String(describing: char.subscribedCentrals))")
+        let centralUUID = central.identifier.uuidString
+        let eventBody: [String: Any] = [
+            "connected": true,
+            "device": centralUUID
+        ]
+        if hasListeners {
+            sendEvent(withName: "BleStatusChangeEvent", body: eventBody)
+        }
+        print("Central \(centralUUID) subscribed to characteristic \(characteristic.uuid)")
     }
 
-    // Respond to Unsubscribe events
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
-        let char = characteristic as! CBMutableCharacteristic
-        print("unsubscribed centrals: \(String(describing: char.subscribedCentrals))")
+        let centralUUID = central.identifier.uuidString
+        let eventBody: [String: Any] = [
+            "connected": false,
+            "device": centralUUID
+        ]
+        if hasListeners {
+            sendEvent(withName: "BleStatusChangeEvent", body: eventBody)
+        }
+        print("Central \(centralUUID) unsubscribed from characteristic \(characteristic.uuid)")
     }
 
     // Service added
@@ -225,7 +280,7 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         }
     }
 
-    @objc override func supportedEvents() -> [String]! { return ["onWarning"] }
+    @objc override func supportedEvents() -> [String]! { return ["onWarning", "BleStatusChangeEvent", "WriteEvent"] }
     override func startObserving() { hasListeners = true }
     override func stopObserving() { hasListeners = false }
     @objc override static func requiresMainQueueSetup() -> Bool { return false }

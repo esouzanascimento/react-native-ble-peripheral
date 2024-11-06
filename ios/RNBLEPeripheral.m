@@ -4,36 +4,54 @@
 
 @interface RCT_EXTERN_MODULE(BLEPeripheral, RCTEventEmitter)
 
-// Best explanation: https://medium.com/@andrei.pfeiffer/react-natives-rct-extern-method-c61c17bf17b2
+// Promise-based methods
+RCT_EXTERN_METHOD(
+  isAdvertising:
+  (RCTPromiseResolveBlock)resolve
+  rejecter: (RCTPromiseRejectBlock)reject
+)
 
 RCT_EXTERN_METHOD(
-    isAdvertising:
-    (RCTPromiseResolveBlock)resolve
-    rejecter: (RCTPromiseRejectBlock)reject
+  start:
+  (RCTPromiseResolveBlock)resolve
+  rejecter: (RCTPromiseRejectBlock)reject
 )
+
+// Other methods
+RCT_EXTERN_METHOD(setName: (NSString *)name)
+
 RCT_EXTERN_METHOD(
-    setName: (NSString *)string
+  addService: (NSString *)uuid
+  primary: (BOOL)primary
 )
+
 RCT_EXTERN_METHOD(
-    addService: (NSString *)uuid
-    primary:    (BOOL)primary
+  addCharacteristicToService: (NSString *)serviceUUID
+  uuid: (NSString *)uuid
+  permissions: (NSUInteger)permissions
+  properties: (NSUInteger)properties
 )
+
 RCT_EXTERN_METHOD(
-    addCharacteristicToService: (NSString *)uuid
-    permissions:                (NSInteger *)permissions
-    properties:                 (NSInteger *)properties
-    data:                       (NSString *)data
+  addCharacteristicToServiceWithValue: (NSString *)serviceUUID
+  uuid: (NSString *)uuid
+  permissions: (NSUInteger)permissions
+  properties: (NSUInteger)properties
+  value: (NSString *)value
 )
-RCT_EXTERN_METHOD(
-    start:
-    (RCTPromiseResolveBlock)resolve
-    rejecter:   (RCTPromiseRejectBlock)reject
-)
+
 RCT_EXTERN_METHOD(stop)
+
 RCT_EXTERN_METHOD(
-    sendNotificationToDevices: (NSString *)characteristicUUID
-    data: (NSString *)data
+  sendNotificationToDevices: (NSString *)serviceUUID
+  characteristicUUID: (NSString *)characteristicUUID
+  data: (NSData *)data
 )
-RCT_EXTERN_METHOD(requiresMainQueueSetup)
+
+// Static method
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
 
 @end
