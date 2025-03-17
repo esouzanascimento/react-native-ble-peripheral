@@ -90,12 +90,23 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
         this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
     }
 
+    /**
+     * Add a characteristic to a service. If the characteristic already exists, update its value.
+     * @param serviceUUID The uuid of the service to add the characteristic to.
+     * @param uuid The uuid of the characteristic to add.
+     * @param permissions The permissions for the characteristic.
+     * @param properties The properties for the characteristic.
+     * @param value The value for the characteristic.
+     */
     @ReactMethod
     public void addCharacteristicToServiceWithValue(String serviceUUID, String uuid, Integer permissions, Integer properties, String value) {
         UUID CHAR_UUID = UUID.fromString(uuid);
-        BluetoothGattCharacteristic tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
+        BluetoothGattCharacteristic tempChar = this.servicesMap.get(serviceUUID).getCharacteristic(CHAR_UUID);
+        if (tempChar == null) {
+            tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
+            this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
+        }
         tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
-        this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
     }
 
     private final BluetoothGattServerCallback mGattServerCallback = new BluetoothGattServerCallback() {
