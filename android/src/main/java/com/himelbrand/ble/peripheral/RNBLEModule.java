@@ -20,6 +20,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.UUID;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.ArrayList;
 
 import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -87,7 +89,37 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     public void addCharacteristicToService(String serviceUUID, String uuid, Integer permissions, Integer properties) {
         UUID CHAR_UUID = UUID.fromString(uuid);
         BluetoothGattCharacteristic tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
-        this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
+
+        if (this.servicesMap.containsKey(serviceUUID)) {
+            this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
+        } else {
+            UUID SERVICE_UUID = UUID.fromString(serviceUUID);
+            int type = BluetoothGattService.SERVICE_TYPE_SECONDARY;
+    
+            BluetoothGattService newService = new BluetoothGattService(SERVICE_UUID, type);
+            newService.addCharacteristic(tempChar);
+            // Secondary service must be included in a primary service
+            if (this.servicesMap.isEmpty()) {
+                Log.e("RNBLEModule", "Cannot add secondary service - no primary service exists");
+                return;
+            }
+    
+            // Get the FIRST primary service
+            BluetoothGattService primaryService = null;
+            for (BluetoothGattService service : this.servicesMap.values()) {
+                if (service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY) {
+                    primaryService = service;
+                    break;
+                }
+            }
+    
+            if (primaryService != null) {
+                // Add secondary service AS INCLUDED SERVICE to the primary
+                primaryService.addService(newService);
+            } else {
+                Log.e("RNBLEModule", "No valid primary service found to include secondary service");
+            }
+        }
     }
 
     /**
@@ -101,12 +133,60 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     @ReactMethod
     public void addCharacteristicToServiceWithValue(String serviceUUID, String uuid, Integer permissions, Integer properties, String value) {
         UUID CHAR_UUID = UUID.fromString(uuid);
-        BluetoothGattCharacteristic tempChar = this.servicesMap.get(serviceUUID).getCharacteristic(CHAR_UUID);
-        if (tempChar == null) {
-            tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
-            this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
+        if (this.servicesMap.containsKey(serviceUUID)) {
+            BluetoothGattCharacteristic tempChar = this.servicesMap.get(serviceUUID).getCharacteristic(CHAR_UUID);
+            if (tempChar == null) {
+                tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
+                this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
+            }
+            if (mGattServer != null) {
+                BluetoothGattService service = mGattServer.getService(UUID.fromString(serviceUUID));
+                if (service != null) {
+                    BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHAR_UUID);
+                    if (characteristic != null) {
+                        characteristic.setValue(value.getBytes(StandardCharsets.UTF_8));
+                    }
+                }
+            }
+            tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
+        } else {
+            BluetoothGattService primaryService = null;
+            for (BluetoothGattService service : this.servicesMap.values()) {
+                if (service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY) {
+                    primaryService = service;
+                    break;
+                }
+            }
+            
+            if (primaryService != null) {
+                UUID SERVICE_UUID = UUID.fromString(serviceUUID);
+                int type = BluetoothGattService.SERVICE_TYPE_SECONDARY;
+
+                List<BluetoothGattService> includedServices = primaryService.getIncludedServices();
+                BluetoothGattService secondaryService = null;
+                for (BluetoothGattService includedService : includedServices) {
+                    if (includedService.getUuid().equals(SERVICE_UUID)) {
+                        secondaryService = includedService;
+                        break;
+                    }
+                }
+
+                if (secondaryService != null) {
+                    BluetoothGattCharacteristic tempChar = secondaryService.getCharacteristic(CHAR_UUID);
+                    if (tempChar == null) {
+                        tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
+                        secondaryService.addCharacteristic(tempChar);
+                    }
+                    tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
+                } else {
+                    BluetoothGattService newService = new BluetoothGattService(SERVICE_UUID, type);
+                    BluetoothGattCharacteristic tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
+                    newService.addCharacteristic(tempChar);
+                    tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
+                    primaryService.addService(newService);
+                }
+            }
         }
-        tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private final BluetoothGattServerCallback mGattServerCallback = new BluetoothGattServerCallback() {
@@ -215,11 +295,19 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
 
         AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
                 .setIncludeDeviceName(false);
-        // Add only essential service UUIDs
-        if (!servicesMap.isEmpty()) {
-            // Assuming you have a primary service to advertise
-            BluetoothGattService primaryService = servicesMap.values().iterator().next();
-            dataBuilder.addServiceUuid(new ParcelUuid(primaryService.getUuid()));
+        // Collect all primary service UUIDs
+        List<ParcelUuid> primaryServiceUuids = new ArrayList<>();
+        for (BluetoothGattService service : this.servicesMap.values()) {
+            if (service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY) {
+                primaryServiceUuids.add(new ParcelUuid(service.getUuid()));
+            }
+        }
+
+        // Add primary services to the advertisement data
+        if (!primaryServiceUuids.isEmpty()) {
+            for (ParcelUuid uuid : primaryServiceUuids) {
+                dataBuilder.addServiceUuid(uuid);
+            }
         }
         AdvertiseData data = dataBuilder.build();
         Log.i("RNBLEModule", data.toString());
