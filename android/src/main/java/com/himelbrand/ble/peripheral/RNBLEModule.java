@@ -19,6 +19,8 @@ import android.util.Log;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.UUID;
+import java.util.logging.Handler;
+import android.os.Looper;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.ArrayList;
@@ -42,6 +44,9 @@ import com.facebook.react.modules.core.DeviceEventManagerModule;
  */
 public class RNBLEModule extends ReactContextBaseJavaModule{
 
+    private static final long INITIAL_RETRY_DELAY = 2000;   // 2 seconds
+    private static final long MAX_RETRY_DELAY = 30000;      // 30 seconds
+
     ReactApplicationContext reactContext;
     HashMap<String, BluetoothGattService> servicesMap;
     BluetoothDevice mBluetoothDevice;
@@ -50,6 +55,8 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     BluetoothGattServer mGattServer;
     BluetoothLeAdvertiser advertiser;
     AdvertiseCallback advertisingCallback;
+    private long currentDelay = INITIAL_RETRY_DELAY;
+    private Promise startPromise;
     String name;
     boolean advertising;
     private String invalidDeviceAddress = null;
@@ -120,6 +127,17 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
                 Log.e("RNBLEModule", "No valid primary service found to include secondary service");
             }
         }
+    }
+
+    private void scheduleRetry() {
+        // Use fully-qualified Handler to avoid abstract import
+        new android.os.Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                currentDelay = Math.min(currentDelay * 2, MAX_RETRY_DELAY);
+                startPeripheral();
+            }
+        }, currentDelay);
     }
 
     /**
@@ -273,69 +291,94 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     }
 
     @ReactMethod
-    public void start(final Promise promise){
-        mBluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
-        mBluetoothAdapter = mBluetoothManager.getAdapter();
-        mBluetoothAdapter.setName(this.name);
-        // Ensures Bluetooth is available on the device and it is enabled. If not,
-        // displays a dialog requesting user permission to enable Bluetooth.
+    public void start(final Promise promise) {
+        this.startPromise = promise;
+        this.currentDelay = INITIAL_RETRY_DELAY;
+        serverIsReady = false;
+        startPeripheral();
+    }
 
-        mBluetoothDevice = null;
-        mGattServer = mBluetoothManager.openGattServer(reactContext, mGattServerCallback);
-        for (BluetoothGattService service : this.servicesMap.values()) {
+    private void startPeripheral() {
+        BluetoothManager mgr = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        if (mgr == null) {
+            scheduleRetry();
+            return;
+        }
+
+        BluetoothAdapter adapter = mgr.getAdapter();
+        if (adapter == null || !adapter.isEnabled()) {
+            scheduleRetry();
+            return;
+        }
+
+        mBluetoothManager = mgr;
+        mBluetoothAdapter = adapter;
+        mBluetoothAdapter.setName(this.name);
+
+        BluetoothGattServer gattServer = mgr.openGattServer(reactContext, mGattServerCallback);
+        if (gattServer == null) {
+            scheduleRetry();
+            return;
+        }
+
+        mGattServer = gattServer;
+        for (BluetoothGattService service : servicesMap.values()) {
             mGattServer.addService(service);
         }
+
         advertiser = mBluetoothAdapter.getBluetoothLeAdvertiser();
+        if (advertiser == null) {
+            scheduleRetry();
+            return;
+        }
+
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                 .setConnectable(true)
                 .build();
 
-
         AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
                 .setIncludeDeviceName(false);
-        // Collect all primary service UUIDs
         List<ParcelUuid> primaryServiceUuids = new ArrayList<>();
-        for (BluetoothGattService service : this.servicesMap.values()) {
+        for (BluetoothGattService service : servicesMap.values()) {
             if (service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY) {
                 primaryServiceUuids.add(new ParcelUuid(service.getUuid()));
             }
         }
-
-        // Add primary services to the advertisement data
-        if (!primaryServiceUuids.isEmpty()) {
-            for (ParcelUuid uuid : primaryServiceUuids) {
-                dataBuilder.addServiceUuid(uuid);
-            }
+        for (ParcelUuid uuid : primaryServiceUuids) {
+            dataBuilder.addServiceUuid(uuid);
         }
         AdvertiseData data = dataBuilder.build();
-        Log.i("RNBLEModule", data.toString());
 
         if (advertisingCallback == null) {
             advertisingCallback = new AdvertiseCallback() {
                 @Override
                 public void onStartSuccess(AdvertiseSettings settingsInEffect) {
                     super.onStartSuccess(settingsInEffect);
+                    serverIsReady = true;
                     advertising = true;
-                    promise.resolve("Success, Started Advertising");
-
+                    if (startPromise != null) {
+                        startPromise.resolve("Success, Started Advertising");
+                        startPromise = null;
+                    }
                 }
 
                 @Override
                 public void onStartFailure(int errorCode) {
-                    advertising = false;
-                    Log.e("RNBLEModule", "Advertising onStartFailure: " + errorCode);
-                    promise.reject("Advertising onStartFailure: " + errorCode);
                     super.onStartFailure(errorCode);
+                    advertising = false;
+                    if (startPromise != null) {
+                        startPromise.reject("Advertising failure", "Error code: " + errorCode);
+                        startPromise = null;
+                    }
                 }
             };
         }
 
         advertiser.startAdvertising(settings, data, advertisingCallback);
-        serverIsReady = true;
-
     }
+
     @ReactMethod
     public void stop(){
         if (mBluetoothAdapter !=null && mBluetoothAdapter.isEnabled() && advertiser != null) {
