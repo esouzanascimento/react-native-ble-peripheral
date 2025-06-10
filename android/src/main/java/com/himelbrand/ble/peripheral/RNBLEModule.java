@@ -269,6 +269,7 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
             if (responseNeeded) {
                 mGattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
             }
+            map.putString("characteristicUUID", characteristic.getUuid().toString());
             reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("WriteEvent", map);
         }
     };
