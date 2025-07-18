@@ -62,6 +62,7 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     private String invalidDeviceAddress = null;
     private Context context;
     private boolean serverIsReady = false;
+    private HashMap<String, byte[]> characteristicValues = new HashMap<>();
 
     public RNBLEModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -150,6 +151,8 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
      */
     @ReactMethod
     public void addCharacteristicToServiceWithValue(String serviceUUID, String uuid, Integer permissions, Integer properties, String value) {
+        this.characteristicValues.put(uuid, value.getBytes(StandardCharsets.UTF_8));
+
         UUID CHAR_UUID = UUID.fromString(uuid);
         if (this.servicesMap.containsKey(serviceUUID)) {
             BluetoothGattCharacteristic tempChar = this.servicesMap.get(serviceUUID).getCharacteristic(CHAR_UUID);
@@ -157,6 +160,11 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
                 tempChar = new BluetoothGattCharacteristic(CHAR_UUID, properties, permissions);
                 this.servicesMap.get(serviceUUID).addCharacteristic(tempChar);
             }
+            // Set the value on the object for its initial state.
+            tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
+
+            // The rest of your logic can largely remain, as it also attempts to set the value.
+            // But our new onCharacteristicReadRequest will be the source of truth.
             if (mGattServer != null) {
                 BluetoothGattService service = mGattServer.getService(UUID.fromString(serviceUUID));
                 if (service != null) {
@@ -166,7 +174,6 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
                     }
                 }
             }
-            tempChar.setValue(value.getBytes(StandardCharsets.UTF_8));
         } else {
             BluetoothGattService primaryService = null;
             for (BluetoothGattService service : this.servicesMap.values()) {
@@ -243,8 +250,13 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
                         /* value (optional) */ null);
                 return;
             }
+
+            String charUUID = characteristic.getUuid().toString();
+
+            byte[] value = characteristicValues.get(charUUID);
+            
             mGattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,
-                    offset, characteristic.getValue());
+                    offset, value);
         }
 
         @Override
